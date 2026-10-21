@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="description" content="Kernel-variance uncertainty heads on a frozen SmolVLA policy show which part of an input is unfamiliar, live during execution.">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Post-hoc Epistemic Uncertainty for VLA Policies</title>
+  <!-- Layout and styles from the Nerfies project page template (CC BY-SA 4.0): https://github.com/nerfies/nerfies.github.io -->
+  <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro" rel="stylesheet">
+  <link rel="stylesheet" href="./static/css/bulma.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+  <link rel="stylesheet" href="./static/css/index.css">
+  <script defer src="./static/js/fontawesome.all.min.js"></script>
+  <style>
+:root { --bg: #ffffff; --fg: #363636; --muted: #6b6b6b; --line: #e6e6e6; --soft: #f5f5f5; --band: #f5f5f5;
+  --accent: #3273dc; --amber: #e8743b; --info-bg: #eef3fc; --ok: #257942; --ok-bg: #effaf3; --bad: #cc0f35; --bad-bg: #feecf0;
+  --draft: #946c00; --draft-bg: #fffaeb; }
+.section-lead { color: #4a4a4a; max-width: 760px; margin: 0 auto 1.6rem; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.8rem 1.4rem; }
+@media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+.card { background: none; box-shadow: none; }
+.card video, .teaser video { width: 100%; display: block; border-radius: 6px; background: #ffffff;
+  box-shadow: 0 2px 3px rgba(10, 10, 10, .1), 0 0 0 1px rgba(10, 10, 10, .1); }
+.card h3 { font-family: 'Google Sans', sans-serif; font-size: 1.15rem; margin: .6rem 0 .2rem; display: flex; flex-wrap: wrap;
+  gap: .4rem; align-items: center; }
+.card p { color: #4a4a4a; font-size: .95rem; margin: 0; }
+.badge { font-size: .75rem; font-weight: 700; padding: .1rem .55rem; border-radius: 999px; white-space: nowrap; }
+.badge.ok { color: var(--ok); background: var(--ok-bg); } .badge.bad { color: var(--bad); background: var(--bad-bg); }
+.badge.info { color: var(--accent); background: var(--info-bg); }
+.badge.ok::before { content: "✓ "; } .badge.bad::before { content: "✗ "; }
+.tldr-list { text-align: left; max-width: 760px; margin: 1rem auto 0; }
+.tablewrap { overflow-x: auto; }
+.tablewrap table { margin: 0 auto; font-variant-numeric: tabular-nums; border-top: 2px solid #363636; border-bottom: 2px solid #363636; }
+.tablewrap th, .tablewrap td { padding: .4rem .8rem; text-align: center; white-space: nowrap; border: 0; }
+.tablewrap th:first-child, .tablewrap td:first-child { text-align: left; }
+.tablewrap thead th { border-bottom: 1px solid #363636; }
+.tablewrap td.hi { color: var(--accent); font-weight: 700; } .tablewrap td.na { color: #9a9a9a; }
+.caption { color: #6b6b6b; font-size: .9rem; margin-top: .5rem; }
+.tablewrap .ci { color: #6b6b6b; font-size: .85em; }
+.figs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.4rem; margin-top: 2rem; }
+@media (max-width: 768px) { .figs { grid-template-columns: 1fr; } }
+.figs img { width: 100%; border: 1px solid #ededed; border-radius: 6px; }
+.btn { display: inline-flex; align-items: center; gap: .4rem; padding: .35rem 1rem; border-radius: 999px; background: #363636;
+  color: #fff; border: 0; cursor: pointer; font-size: .9rem; }
+.explainer { background: transparent !important; box-shadow: none !important; clip-path: none !important; padding: 0 !important; }
+.explainer #arch text { font-family: 'Google Sans', 'Noto Sans', sans-serif !important; }
+.button.is-static-soon { opacity: .55; pointer-events: none; }
+.badge.np { color: #6b6b6b; background: #f0efec; font-weight: 600; }
+.np-chip { font-size: .72em; font-weight: 600; opacity: .7; margin-left: 4px; }
+table.auroc { font-size: .86rem; }
+table.auroc th.grp { text-align: center !important; font-weight: 600; color: #4a4a4a; border-bottom: 1px solid #d5d5d5 !important; }
+table.auroc th.rot { vertical-align: bottom; padding: .3rem .25rem !important; }
+table.auroc th.rot span { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; font-weight: 600; }
+table.auroc td { padding: .25rem .45rem !important; }
+table.auroc td.id { color: #6b6b6b; text-align: right !important; padding-right: .2rem !important; }
+table.auroc tr.group td { font-style: italic; color: #4a4a4a; padding-top: .55rem !important; background: none; }
+table.auroc tr.mean td { border-top: 1px solid #363636; font-weight: 600; }
+table.auroc td:nth-child(2) { white-space: normal; min-width: 15rem; }
+.figs.one { grid-template-columns: minmax(0, 1fr); max-width: 760px; margin-left: auto; margin-right: auto; }
+.run-video video { background: #ffffff !important; box-shadow: 0 2px 3px rgba(10, 10, 10, .1), 0 0 0 1px rgba(10, 10, 10, .1); }
+.diagram-wrap { max-width: 100%; overflow-x: auto; } section.hero > .container { width: 100%; min-width: 0; }
+</style>
+</head>
+<body>
+
+<section class="hero">
+  <div class="hero-body">
+    <div class="container is-max-desktop">
+      <div class="columns is-centered">
+        <div class="column has-text-centered">
+          <h1 class="title is-1 publication-title">Post-hoc Epistemic Uncertainty for Vision&ndash;Language&ndash;Action Policies</h1>
+          <div class="is-size-5 publication-authors">
+            <span class="author-block">Johannes Keller<sup>1</sup>,</span>
+            <span class="author-block">Albrecht M. Blo&szlig;e<sup>1</sup>,</span>
+            <span class="author-block">Adrian Lindenmeyer<sup>1</sup>,</span>
+            <span class="author-block">Thomas Neumuth<sup>1</sup>,</span>
+            <span class="author-block">Daniel Schneider<sup>1</sup></span>
+          </div>
+          <div class="is-size-5 publication-authors">
+            <span class="author-block"><sup>1</sup>Innovation Center Computer Assisted Surgery (ICCAS), Leipzig University, Leipzig, Germany</span>
+          </div>
+          <div class="column has-text-centered">
+            <div class="publication-links">
+              <span class="link-block">
+                <a aria-disabled="true" class="external-link button is-normal is-rounded is-dark is-static-soon">
+                  <span class="icon"><i class="fas fa-file-pdf"></i></span><span>Paper (soon)</span>
+                </a>
+              </span>
+              <span class="link-block">
+                <a aria-disabled="true" class="external-link button is-normal is-rounded is-dark is-static-soon">
+                  <span class="icon"><i class="ai ai-arxiv"></i></span><span>arXiv (soon)</span>
+                </a>
+              </span>
+              <span class="link-block">
+                <a href="https://github.com/post-hoc-vla-uncertainty/post-hoc-vla-uncertainty" class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon"><i class="fab fa-github"></i></span><span>Code</span>
+                </a>
+              </span>
+              <span class="link-block">
+                <a href="#videos" class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon"><i class="fas fa-film"></i></span><span>Videos</span>
+                </a>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="hero teaser">
+  <div class="container is-max-desktop">
+    <div class="hero-body">
+      <video src="videos/explainer_instruction_negated.mp4" poster="posters/explainer_instruction_negated.jpg" muted loop playsinline controls preload="metadata" data-autoplay></video>
+      <h2 class="subtitle has-text-centered is-size-6 mt-3">From step 30 to 89 the instruction reads &ldquo;do not put both &hellip;&rdquo;. Only the instruction head jumps to 100;
+  the camera and state heads stay at their typical level until the robot starts to behave differently, and the fused heads
+  (KV-Ctx, KV-Dec) rise with the change. The policy still succeeds: unfamiliar is not the same as harmful.
+  Event E3 of the paper; illustrative run of the pilot policy.</h2>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Abstract</h2>
+        <div class="content has-text-justified">
+          <p>Vision&ndash;language&ndash;action (VLA) policies need to recognize gaps in their training knowledge to
+request useful demonstrations or assistance in new situations, especially when failures are costly. Disagreement within an
+ensemble of independently trained policies can guide these decisions, but requires training and running multiple policies.
+We propose post-hoc kernel-variance heads that estimate epistemic uncertainty from the embeddings of a single policy. Each
+head computes the conditional variance of a Gaussian process conditioned on embeddings from the training demonstrations.
+Fitting requires no regression targets or gradient updates and leaves the policy unchanged. In experiments with SmolVLA on
+LIBERO-10, the kernel variance heads perform competitively with two-policy ensemble scores in task-level correlation with
+task success, in demonstration acquisition during active learning, and in referral to a stronger supervisor policy as a
+proxy for human assistance. For SmolVLA, the head on the vision&ndash;language backbone reduces uncertainty-scoring time by up
+to approximately a factor of 50 compared with ensemble scores, while also substantially reducing setup costs. We also show
+that the established evaluation protocol on LIBERO-10 primarily rewards recognition of coverage differences between tasks,
+while execution variability weakens assessment of within-task rankings. Thus, controlled perturbations provide a
+complementary evaluation: modality-specific heads identify unfamiliar camera, instruction, or state inputs, while fused
+heads can detect unfamiliar combinations of individually familiar inputs. With a supervisor proxy trained on the evaluated
+perturbation families, the decoder head improves within-task referral over ensemble disagreement. These findings show that
+useful uncertainty estimates for adaptive robot learning can be obtained from a single policy. Code available at
+<a href="https://github.com/post-hoc-vla-uncertainty/post-hoc-vla-uncertainty">github.com/post-hoc-vla-uncertainty/post-hoc-vla-uncertainty</a>.</p>
+          <ul class="tldr-list">
+            <li><b>One policy, no ensemble.</b> Kernel-variance heads estimate epistemic uncertainty from the embeddings of a single
+      trained policy: the conditional variance of a Gaussian process on embeddings of the training demonstrations. Fitting
+      needs no regression targets or gradient updates and leaves the policy unchanged.</li><li><b>Competitive with ensembles, far cheaper.</b> With SmolVLA on LIBERO-10, the heads perform competitively with
+      two-policy ensemble scores in task-level correlation with success, in demonstration acquisition and in referral to a
+      stronger supervisor, while scoring up to about 50&times; faster.</li><li><b>What the benchmark rewards.</b> The established LIBERO-10 protocol mainly rewards recognizing coverage differences
+      between tasks; execution variability weakens the assessment of rankings within a task.</li><li><b>Which input is unfamiliar?</b> Heads on single inputs identify unfamiliar camera, instruction or state inputs; heads
+      on fused embeddings detect unfamiliar combinations of familiar inputs, such as an instruction naming objects absent
+      from the scene (every raw head at chance, KV-Dec 1.00).</li><li><b>Referral within a task.</b> With a supervisor trained on the perturbations, KV-Dec refers better than ensemble
+      disagreement: within-task nAUC 0.46 against 0.40 for VFD.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section hero is-light" id="method">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">How it works</h2>
+    <p class="has-text-centered section-lead">Kernel-variance heads read embeddings the frozen policy computes anyway. Pick a disturbance to see which head
+responds: each gauge shows how far that head rose above its undisturbed twin run (percentile points, three seeds and all
+ten tasks; the events marked &ldquo;not in the paper&rdquo; come from the pilot policy or are extra), and the run below
+plays with all six heads.</p>
+    
+
+<div class="explainer">
+  <div class="chips" role="radiogroup" aria-label="Disturbance">
+    <button class="chip" role="radio" data-event="clean" aria-checked="true">Undisturbed</button>
+    <button class="chip" role="radio" data-event="instruction_negated" aria-checked="false">Instruction negated</button>
+    <button class="chip" role="radio" data-event="vanish_all" aria-checked="false">All objects removed <small class="np-chip">not in the paper</small></button>
+    <button class="chip" role="radio" data-event="vanish_target" aria-checked="false">Target removed</button>
+    <button class="chip" role="radio" data-event="arm_push" aria-checked="false">Arm pushed</button>
+    <button class="chip" role="radio" data-event="action_noise" aria-checked="false">Action noise <small class="np-chip">not in the paper</small></button>
+    <button class="chip" role="radio" data-event="mass_heavy" aria-checked="false">Objects 10× heavier <small class="np-chip">not in the paper</small></button>
+  </div>
+  <p class="event-note" id="event-note" aria-live="polite"></p>
+
+  <div class="diagram-wrap">
+  <svg id="arch" viewBox="0 0 920 380" role="img" aria-label="SmolVLA with uncertainty heads. Four inputs feed the frozen vision-language prefix; raw heads tap each input, KV-Ctx taps the fused context, KV-Dec taps the action expert at flow step 9. VFD compares the policy with a second policy.">
+    <defs>
+      <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="ah"/></marker>
+    </defs>
+    <!-- inputs -->
+    <g class="input" data-input="ws"><rect x="16" y="28" width="132" height="56" rx="10"/><text x="82" y="52">Workspace</text><text x="82" y="70" class="sub">camera</text></g>
+    <g class="input" data-input="wrist"><rect x="16" y="108" width="132" height="56" rx="10"/><text x="82" y="132">Wrist</text><text x="82" y="150" class="sub">camera</text></g>
+    <g class="input" data-input="lang"><rect x="16" y="188" width="132" height="56" rx="10"/><text x="82" y="212">Instruction</text><text x="82" y="230" class="sub">“put both the …”</text></g>
+    <g class="input" data-input="state"><rect x="16" y="268" width="132" height="56" rx="10"/><text x="82" y="292">Robot state</text><text x="82" y="310" class="sub">8 values</text></g>
+    <!-- arrows into the prefix -->
+    <path class="flow" d="M148 56H346" marker-end="url(#ah)"/><path class="flow" d="M148 136H346" marker-end="url(#ah)"/>
+    <path class="flow" d="M148 216H346" marker-end="url(#ah)"/><path class="flow" d="M148 296H346" marker-end="url(#ah)"/>
+    <!-- frozen prefix -->
+    <rect class="core" x="350" y="28" width="136" height="296" rx="12"/>
+    <text class="core-t" x="418" y="166">VLM prefix</text><text class="core-s" x="418" y="186">transformer</text>
+    <text class="core-s" x="418" y="204">(frozen)</text>
+    <!-- fused context to action expert -->
+    <path class="flow" d="M486 176H604" marker-end="url(#ah)"/>
+    <rect class="core" x="608" y="122" width="172" height="108" rx="12"/>
+    <text class="core-t" x="694" y="152">Action expert</text><text class="core-s" x="694" y="170">flow matching, 10 steps</text>
+    <g id="flowsteps"></g>
+    <path class="flow" d="M780 176H900" marker-end="url(#ah)"/><text class="core-s" x="840" y="166">actions</text>
+    <!-- taps -->
+    <path class="tap" d="M545 176V120"/>
+    <path class="tap" d="M747 214V262"/>
+    <!-- second policy for VFD -->
+    <rect class="ghost" x="608" y="16" width="172" height="62" rx="12"/>
+    <text class="core-s" x="694" y="40">second policy</text><text class="core-s" x="694" y="58">(separately pre-trained)</text>
+    <path class="tap vfd" d="M780 47H808M694 78V122"/>
+    <!-- gauges are added by script -->
+    <g id="gauges"></g>
+  </svg>
+  </div>
+  <div class="legend-row">
+    <span><i class="sw raw"></i>raw input heads: one per input, before the transformer mixes them</span>
+    <span><i class="sw paper"></i>paper heads: KV-Ctx (fused context) and KV-Dec (action expert)</span>
+    <span><i class="sw base"></i>baseline VFD: disagreement with a second policy</span>
+  </div>
+</div>
+
+<div class="run-video">
+  <video id="explainer-video" muted loop playsinline controls preload="none"></video>
+  <p class="run-hint" id="explainer-hint">Pick a disturbance above to play its run: left the undisturbed episode, right the
+  same episode with the disturbance (red band, steps 30–89), and every head as a percentile among clean steps.
+  Illustrative runs of the pilot policy.</p>
+</div>
+
+<style>
+.explainer { background: var(--soft); border-radius: 14px; padding: 18px 18px 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.chip { font: 600 14px "Source Sans 3", sans-serif; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--fg); cursor: pointer; }
+.chip[aria-checked="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.event-note { text-align: center; color: var(--muted); font-size: 15px; min-height: 1.6em; margin: 10px auto 4px; max-width: 760px; }
+.diagram-wrap { overflow-x: auto; }
+#arch { width: 100%; min-width: 640px; height: auto; display: block; }
+#arch text { font: 600 14px "Source Sans 3", sans-serif; fill: var(--fg); text-anchor: middle; }
+#arch text.sub, #arch .core-s { font-weight: 400; font-size: 12.5px; fill: var(--muted); }
+#arch .core-t { font: 600 16px "Source Serif 4", Georgia, serif; }
+#arch .input rect { fill: var(--bg); stroke: var(--line); stroke-width: 1.5; transition: stroke .3s, fill .3s; }
+#arch .input.hit rect { stroke: var(--bad); stroke-width: 2.5; fill: var(--bad-bg); }
+#arch .core { fill: var(--info-bg); stroke: var(--accent); stroke-width: 1.5; }
+#arch .ghost { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 4 4; }
+#arch .flow { stroke: var(--fg); stroke-width: 1.6; fill: none; }
+#arch .ah { fill: var(--fg); }
+#arch .tap { stroke: var(--accent); stroke-width: 1.4; stroke-dasharray: 5 4; fill: none; }
+#arch .tap.vfd { stroke: var(--muted); }
+#arch .step { fill: var(--bg); stroke: var(--accent); stroke-width: 1; }
+#arch .step.read { fill: var(--accent); }
+.gauge .ring { fill: var(--bg); stroke: var(--line); stroke-width: 7; }
+.gauge .arc { fill: none; stroke-width: 7; stroke-linecap: round; transition: stroke-dashoffset .7s ease; }
+.gauge.raw .arc { stroke: #d97a2b; } .gauge.paper .arc { stroke: var(--accent); } .gauge.base .arc { stroke: var(--muted); }
+.gauge .val { font: 700 13px "Source Sans 3", sans-serif !important; }
+.gauge .lab { font: 600 11.5px "Source Sans 3", sans-serif !important; fill: var(--muted) !important; }
+.run-video { margin-top: 16px; }
+.run-video video { width: 100%; border-radius: 10px; background: #0f1115; }
+.run-video video:not([src]) { display: none; }
+.run-hint { text-align: center; color: var(--muted); font-size: 15px; margin: 8px auto 0; max-width: 760px; }
+.legend-row { display: flex; flex-wrap: wrap; gap: 6px 22px; justify-content: center; color: var(--muted); font-size: 14px; margin-top: 8px; }
+.sw { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.sw.raw { background: #d97a2b; } .sw.paper { background: var(--accent); } .sw.base { background: var(--muted); }
+</style>
+
+<script>
+(() => {
+  // GENERATED:RISE (site/sync_paper_results.py)
+  // Rise in mean percentile during the event vs the undisturbed twin, from the paper's E3 summary (negative shown as 0).
+  const RISE = {
+    clean: { pre_ws: 0, pre_wrist: 0, pre_lang: 0, pre_state: 0, kv_ctx: 0, kv_dec: 0, vfd: 0 },
+    instruction_negated: { pre_ws: 0, pre_wrist: 0, pre_lang: 50, pre_state: 0, kv_ctx: 22, kv_dec: 18, vfd: 9 },
+    vanish_target: { pre_ws: 15, pre_wrist: 25, pre_lang: 0, pre_state: 2, kv_ctx: 39, kv_dec: 34, vfd: 40 },
+    arm_push: { pre_ws: 21, pre_wrist: 34, pre_lang: 0, pre_state: 22, kv_ctx: 37, kv_dec: 33, vfd: 36 },
+    mass_heavy: { pre_ws: 0, pre_wrist: 0, pre_lang: 0, pre_state: 0, kv_ctx: 0, kv_dec: 0, vfd: 0 },
+    vanish_all: { pre_ws: 70, pre_wrist: 26, pre_lang: 0, pre_state: 13, kv_ctx: 61, kv_dec: 52, vfd: 27 },
+    action_noise: { pre_ws: 13, pre_wrist: 23, pre_lang: 0, pre_state: 31, kv_ctx: 17, kv_dec: 22, vfd: 17 },
+  };
+  const SRC = {"clean": "", "instruction_negated": "Gauges: E3 Negated (“do not …”) (paper Table 5), three seeds, all ten tasks.", "vanish_target": "Gauges: E11 Target removed (paper Table 5), three seeds, all ten tasks.", "arm_push": "Gauges: E12 Arm pushed (joints offset by 0.1 rad) (paper Table 5), three seeds, all ten tasks.", "mass_heavy": "Gauges: three seeds, all ten tasks; not in the paper.", "vanish_all": "Gauges: pilot policy, tasks 0 and 1; not in the paper.", "action_noise": "Gauges: pilot policy, tasks 0 and 1; not in the paper."};
+  // END:RISE
+  const HIT = { clean: [], instruction_negated: ["lang"], vanish_all: ["ws", "wrist"], vanish_target: ["ws", "wrist"],
+                arm_push: ["ws", "wrist", "state"], action_noise: ["ws", "wrist", "state"], mass_heavy: [] };
+  const NOTE = {
+    clean: "An undisturbed run: every head stays at its typical level.",
+    instruction_negated: "Only the text changes. The instruction head saturates; the camera heads stay flat; the fused heads follow.",
+    vanish_all: "Every object disappears. The workspace-camera head responds most, the instruction head not at all.",
+    vanish_target: "The grasped object vanishes. The wrist camera sees it more clearly than the workspace camera.",
+    arm_push: "The arm is knocked off its path. Both cameras, the robot state and the fused heads respond.",
+    action_noise: "The commands are corrupted. The robot-state head responds most, because the arm moves unexpectedly.",
+    mass_heavy: "An invisible change: nothing in the input differs until contact, so no score sees it, VFD included.",
+  };
+  const GAUGES = [  // key, label, x, y, kind
+    ["pre_ws", "workspace", 247, 56, "raw"], ["pre_wrist", "wrist", 247, 136, "raw"],
+    ["pre_lang", "instruction", 247, 216, "raw"], ["pre_state", "state", 247, 296, "raw"],
+    ["kv_ctx", "KV-Ctx", 545, 92, "paper"], ["kv_dec", "KV-Dec", 747, 292, "paper"], ["vfd", "VFD", 840, 47, "base"],
+  ];
+  const svg = document.getElementById("arch"), NS = "http://www.w3.org/2000/svg", R = 24, C = 2 * Math.PI * R, MAX = 75;
+  const el = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent.appendChild(e); return e; };
+  const steps = document.getElementById("flowsteps");
+  for (let i = 0; i < 10; i++) el("rect", { x: 624 + i * 14.6, y: 196, width: 10, height: 14, rx: 2, class: "step" + (i === 8 ? " read" : "") }, steps);
+  const arcs = {}, vals = {};
+  for (const [key, label, x, y, kind] of GAUGES) {
+    const g = el("g", { class: "gauge " + kind }, document.getElementById("gauges"));
+    el("circle", { cx: x, cy: y, r: R, class: "ring" }, g);
+    arcs[key] = el("circle", { cx: x, cy: y, r: R, class: "arc", "stroke-dasharray": C, "stroke-dashoffset": C,
+                               transform: `rotate(-90 ${x} ${y})` }, g);
+    vals[key] = el("text", { x, y: y + 5, class: "val" }, g);
+    const lab = el("text", { x, y: y + R + 16, class: "lab" }, g); lab.textContent = label;
+  }
+  const note = document.getElementById("event-note");
+  function show(event) {
+    for (const [key] of GAUGES) {
+      const v = RISE[event][key];
+      arcs[key].setAttribute("stroke-dashoffset", C * (1 - Math.min(v, MAX) / MAX));
+      vals[key].textContent = v ? "+" + v : "0";
+    }
+    svg.querySelectorAll(".input").forEach(g => g.classList.toggle("hit", HIT[event].includes(g.dataset.input)));
+    note.textContent = NOTE[event] + (SRC[event] ? " " + SRC[event] : "");
+    document.querySelectorAll(".chip").forEach(c => c.setAttribute("aria-checked", String(c.dataset.event === event)));
+    const video = document.getElementById("explainer-video"), hint = document.getElementById("explainer-hint");
+    if (event === "clean") {
+      video.pause(); video.removeAttribute("src"); video.removeAttribute("poster"); video.load();
+      hint.hidden = false;
+    } else {
+      video.poster = `posters/explainer_${event}.jpg`;
+      video.src = `videos/explainer_${event}.mp4`;
+      hint.hidden = true;
+      if (started) video.play().catch(() => {});
+    }
+  }
+  let started = false;
+  document.querySelectorAll(".chip").forEach(c => c.addEventListener("click", () => { started = true; show(c.dataset.event); }));
+  show("clean");
+
+})();
+</script>
+
+
+  </div>
+</section>
+
+<section class="section" id="attribution">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">Which part of the input is unfamiliar?</h2>
+    <p class="has-text-centered section-lead">Same starting state and seed, so the two runs are identical until the disturbance. Lines show each head as a
+percentile among all steps of undisturbed runs (50 = typical, 100 = above every clean step). Illustrative runs of the pilot policy.</p>
+    
+<div class="grid">
+  <figure class="card">
+    <video src="videos/context_heads_instruction_negated.mp4" poster="posters/context_heads_instruction_negated.jpg" muted loop playsinline controls preload="none" data-autoplay></video>
+    <h3>Instruction negated</h3>
+    <p>“do not put both …” from step 30 to 89. The instruction head jumps to 100 at once; the camera heads stay flat until
+    the robot starts to behave differently. VFD rises much less: in the paper (Table 5, E3), its AUROC for a negated
+    instruction is 0.63, against 0.83 for KV-Ctx.</p>
+  </figure>
+  <figure class="card">
+    <video src="videos/teaser_context_heads_vanish_all.mp4" poster="posters/teaser_context_heads_vanish_all.jpg" muted loop playsinline controls preload="none" data-autoplay></video>
+    <h3>All objects removed <span class="badge np">not in the paper</span></h3>
+    <p>The mirror image: the workspace-camera head saturates, the instruction head does not react.</p>
+  </figure>
+</div>
+
+
+  </div>
+</section>
+
+<section class="section" id="videos">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">VFD and KV live during execution</h2>
+    <p class="has-text-centered section-lead">Left: the undisturbed run. Right: the same run with a disturbance in steps 30–89 (red band). Upper chart:
+one kernel-variance head of a single policy; lower chart: VFD from a two-policy ensemble. Illustrative runs of the pilot
+policy; where the policy visibly fails, VFD detects the change about as well as the heads (see Table 5).</p>
+    
+<div class="grid">
+  <figure class="card">
+    <video src="videos/vfd_kv_vanish_target.mp4" poster="posters/vfd_kv_vanish_target.jpg" muted loop playsinline controls preload="none" data-autoplay></video>
+    <h3>Target object vanishes</h3>
+    <p>The object the robot is reaching for disappears.</p>
+  </figure>
+  <figure class="card">
+    <video src="videos/vfd_kv_vanish_all.mp4" poster="posters/vfd_kv_vanish_all.jpg" muted loop playsinline controls preload="none" data-autoplay></video>
+    <h3>Whole tabletop vanishes <span class="badge np">not in the paper</span></h3>
+    <p>In this run, VFD rises from about 24 to 34 in the window; kernel variance jumps far above its clean range.</p>
+  </figure>
+  <figure class="card">
+    <video src="videos/vfd_kv_scramble.mp4" poster="posters/vfd_kv_scramble.jpg" muted loop playsinline controls preload="none" data-autoplay></video>
+    <h3>Objects scrambled <span class="badge np">not in the paper</span></h3>
+    <p>Every object is thrown to a random pose at every step.</p>
+  </figure>
+  <figure class="card">
+    <video src="videos/vfd_kv_noise_heavy.mp4" poster="posters/vfd_kv_noise_heavy.jpg" muted loop playsinline controls preload="none" data-autoplay></video>
+    <h3>Heavy camera noise</h3>
+    <p>Gaussian noise (σ = 0.35) on both cameras; the policy finishes once the noise stops.</p>
+  </figure>
+  <figure class="card">
+    <video src="videos/vfd_kv_gripper_block.mp4" poster="posters/vfd_kv_gripper_block.jpg" muted loop playsinline controls preload="none" data-autoplay></video>
+    <h3>Gripper replaced by a block <span class="badge np">not in the paper</span></h3>
+    <p>For steps 30–89 the gripper is a rigid block of the same size: the robot looks almost the same but cannot grasp.</p>
+  </figure>
+  <figure class="card">
+    <video src="videos/vfd_kv_vanish_distractor.mp4" poster="posters/vfd_kv_vanish_distractor.jpg" muted loop playsinline controls preload="none" data-autoplay></video>
+    <h3>An irrelevant object vanishes <span class="badge np">not in the paper</span></h3>
+    <p>A change that does not matter for the task. No score should, and none does, raise much.</p>
+  </figure>
+</div>
+
+
+  </div>
+</section>
+
+<section class="section" id="ramps">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">Gradual distribution shift</h2>
+    <p class="has-text-centered section-lead">The disturbance grows from zero to its maximum over the length of the undisturbed run (dashed line, right-hand scale).
+Not in the paper.</p>
+    
+<div class="grid">
+  <figure class="card">
+    <video src="videos/ramp_noise.mp4" poster="posters/ramp_noise.jpg" muted loop playsinline controls preload="none" data-autoplay></video>
+    <h3>Camera noise 0 → σ = 1 <span class="badge np">not in the paper</span></h3>
+  </figure>
+  <figure class="card">
+    <video src="videos/ramp_blend.mp4" poster="posters/ramp_blend.jpg" muted loop playsinline controls preload="none" data-autoplay></video>
+    <h3>Another scene fades in <span class="badge np">not in the paper</span></h3>
+  </figure>
+  <figure class="card">
+    <video src="videos/ramp_orbit45.mp4" poster="posters/ramp_orbit45.jpg" muted loop playsinline controls preload="none" data-autoplay></video>
+    <h3>Camera orbits 0 → 45° <span class="badge np">not in the paper</span></h3>
+    <p>The heads rise steadily even though the policy copes: unfamiliar input is not the same as failure.</p>
+  </figure>
+  <figure class="card">
+    <video src="videos/ramp_orbit360.mp4" poster="posters/ramp_orbit360.jpg" muted loop playsinline controls preload="none" data-autoplay></video>
+    <h3>Camera orbits a full circle <span class="badge np">not in the paper</span></h3>
+  </figure>
+</div>
+
+
+  </div>
+</section>
+
+<section class="section" id="allheads">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">All heads at once</h2>
+    <p class="has-text-centered section-lead">One kernel-variance head per network location, from the raw camera, instruction and state inputs to the action expert.
+Not in the paper.</p>
+    
+<div class="grid">
+  <figure class="card">
+    <video src="videos/heads_gripper_block.mp4" poster="posters/heads_gripper_block.jpg" muted loop playsinline controls preload="none" data-autoplay></video>
+    <h3>Gripper replaced by a block <span class="badge np">not in the paper</span></h3>
+  </figure>
+  <figure class="card">
+    <video src="videos/heads_noise_ramp.mp4" poster="posters/heads_noise_ramp.jpg" muted loop playsinline controls preload="none" data-autoplay></video>
+    <h3>Rising camera noise <span class="badge np">not in the paper</span></h3>
+  </figure>
+</div>
+
+
+  </div>
+</section>
+
+<section class="section" id="timeline">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">Events during execution, step by step</h2>
+    <p class="has-text-centered section-lead">Measured over three policy seeds and all ten LIBERO-10 tasks. Mean percentile of each head among clean steps,
+for the run with the event (solid, with the interquartile band) and the undisturbed run from the same initial state and seed
+(grey, dashed). The event starts at step 100; the shaded window (100&ndash;150) is the one the paper scores (Table 5). Pick an
+event and the heads to compare; VFD can be added for reference.</p>
+    
+<div class="tl-box">
+  <div class="tl-controls" id="tl-events" role="radiogroup" aria-label="Event"><span class="tl-label">Event</span></div>
+  <div class="tl-controls" id="tl-heads" aria-label="Heads"><span class="tl-label">Heads</span></div>
+  <p class="tl-caption" id="tl-success"></p>
+  <div class="tl-grid" id="tl-panels"></div>
+</div>
+<div class="tl-tip" id="tl-tip" role="status"></div>
+<style>
+#tl-panels svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
+#tl-panels svg.chart text { font-family: 'Noto Sans', sans-serif; fill: #6b6b6b; font-size: 11px; }
+#tl-panels svg.chart .tick-label { font-variant-numeric: tabular-nums; }
+#tl-panels svg.chart .title { fill: #363636; font-weight: 700; font-size: 12px; }
+.tl-box { background: #fcfcfb; border: 1px solid #e6e6e6; border-radius: 12px; padding: 16px; }
+.tl-controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.tl-label { font-size: .8rem; font-weight: 700; color: #6b6b6b; text-transform: uppercase; letter-spacing: .04em; margin-right: 4px; }
+.tl-chip { font: 600 13px 'Noto Sans', sans-serif; padding: 4px 11px; border-radius: 999px; border: 1px solid #e6e6e6;
+  background: #ffffff; color: #363636; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.tl-chip[aria-pressed="true"], .tl-chip[aria-checked="true"] { background: #363636; color: #ffffff; border-color: #363636; }
+.tl-chip:focus-visible { outline: 2px solid #3273dc; outline-offset: 2px; }
+.tl-chip .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; box-shadow: 0 0 0 1.5px #ffffff; }
+.tl-caption { color: #6b6b6b; font-size: .88rem; margin: 4px 0 6px; }
+.tl-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; }
+@media (max-width: 700px) { .tl-grid { grid-template-columns: 1fr; } }
+.tl-tip { position: fixed; pointer-events: none; z-index: 20; background: #fff; border: 1px solid #e6e6e6; border-radius: 8px;
+  padding: 7px 10px; font-size: 12.5px; color: #363636; box-shadow: 0 4px 14px rgba(0,0,0,.08); max-width: 300px;
+  font-variant-numeric: tabular-nums; opacity: 0; transition: opacity .1s; }
+.tl-tip .row { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.tl-tip .sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; margin-right: 5px; }
+</style>
+<script>
+// Execution traces of the paper's perturbations (data/timeline.json, from the paper's data/q5).
+(async () => {
+const D = await (await fetch("data/timeline.json")).json();
+// ---------- shared ----------
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+const lin = (d0, d1, r0, r1) => v => r0 + (v - d0) / (d1 - d0) * (r1 - r0);
+const tip = document.getElementById("tl-tip");
+function showTip(evt, html) { tip.innerHTML = html; tip.style.opacity = 1;
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = evt.clientX + 14, y = evt.clientY + 14;
+  if (x + w > innerWidth - 8) x = evt.clientX - w - 14; if (y + h > innerHeight - 8) y = evt.clientY - h - 14;
+  tip.style.left = x + "px"; tip.style.top = y + "px"; }
+const hideTip = () => { tip.style.opacity = 0; };
+const f2 = v => v == null ? "–" : v.toFixed(2);
+
+// Head colours: reference categorical slots (validated adjacent order); fused heads reuse the raw hue, dashed.
+const HEAD = {
+  kv_ctx: { name: "KV-Ctx", color: "#2a78d6" }, kv_dec: { name: "KV-Dec", color: "#4a3aa7" },
+  vfd: { name: "VFD", color: "#6b6b6b", dash: "2 3" },
+  pre_ws: { name: "Workspace", color: "#eb6834" }, pre_wrist: { name: "Wrist", color: "#1baf7a" },
+  pre_lang: { name: "Instruction", color: "#eda100" }, pre_state: { name: "State", color: "#e87ba4" },
+  ctx_ws: { name: "Workspace, fused", color: "#eb6834", dash: "6 3" }, ctx_wrist: { name: "Wrist, fused", color: "#1baf7a", dash: "6 3" },
+  ctx_lang: { name: "Instruction, fused", color: "#eda100", dash: "6 3" }, ctx_state: { name: "State, fused", color: "#e87ba4", dash: "6 3" },
+  comb: { name: "COMB (max)", color: "#363636", dash: "1 3" }, comb_mean: { name: "COMB-mean", color: "#9a9a9a", dash: "1 3" },
+  oracle: { name: "Oracle", color: "#363636", dash: "5 4" },
+};
+function chips(container, items, { multi = false, selected, onChange, swatch = false }) {
+  const box = document.getElementById(container);
+  let sel = new Set(multi ? selected : [selected]);
+  const buttons = items.map(([key, label]) => {
+    const b = document.createElement("button"); b.className = "tl-chip"; b.type = "button";
+    if (swatch) { const s = document.createElement("span"); s.className = "sw"; s.style.background = HEAD[key].color; b.appendChild(s); }
+    b.appendChild(document.createTextNode(label)); b.dataset.key = key;
+    if (!multi) b.setAttribute("role", "radio");
+    b.addEventListener("click", () => {
+      if (multi) { sel.has(key) ? (sel.size > 1 && sel.delete(key)) : sel.add(key); } else sel = new Set([key]);
+      sync(); onChange(multi ? [...sel] : key); });
+    box.appendChild(b); return b; });
+  const sync = () => buttons.forEach(b => b.setAttribute(multi ? "aria-pressed" : "aria-checked", String(sel.has(b.dataset.key))));
+  sync();
+  return { set(keys) { sel = new Set(keys); sync(); } };
+}
+function axes(svg, x, y, { xTicks, yTicks, xFmt = String, yFmt = String, left, right, top, bottom, xLabel, yLabel }) {
+  const g = el("g", {}, svg);
+  for (const t of yTicks) { el("line", { x1: left, x2: right, y1: y(t), y2: y(t), stroke: "#eeeeec" }, g);
+    const tx = el("text", { x: left - 6, y: y(t) + 4, "text-anchor": "end", class: "tick-label" }, g); tx.textContent = yFmt(t); }
+  for (const t of xTicks) { const tx = el("text", { x: x(t), y: bottom + 16, "text-anchor": "middle", class: "tick-label" }, g); tx.textContent = xFmt(t); }
+  el("line", { x1: left, x2: right, y1: bottom, y2: bottom, stroke: "#c9c9c6" }, g);
+  if (xLabel) { const t = el("text", { x: (left + right) / 2, y: bottom + 34, "text-anchor": "middle" }, g); t.textContent = xLabel; }
+  if (yLabel) { const t = el("text", { x: 0, y: 0, transform: `translate(${left - 40} ${(top + bottom) / 2}) rotate(-90)`, "text-anchor": "middle" }, g); t.textContent = yLabel; }
+  return g;
+}
+// Direct labels at line ends, nudged apart so they never overlap.
+function directLabels(svg, items, x0, minGap = 13, lo = -Infinity, hi = Infinity) {
+  items.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < items.length; i++) items[i].y = Math.max(items[i].y, items[i - 1].y + minGap);
+  const over = items.length ? items[items.length - 1].y - hi : 0;
+  if (over > 0) items.forEach(it => it.y -= over);
+  for (const it of items) { const t = el("text", { x: x0, y: it.y + 4, class: "direct" }, svg); t.textContent = it.text; }
+}
+
+// ---------- 4. event timeline ----------
+{
+  const evs = Object.entries(D.e3.events);
+  let ev = "I5", heads = ["kv_ctx", "kv_dec", "pre_lang"];  // VFD off by default; it can be switched on
+  const box = document.getElementById("tl-panels"), steps = D.e3.steps, onset = D.e3.onset, win = D.e3.window;
+  chips("tl-events", evs.map(([k, e]) => [k, e.description.replace(" (60 steps)", "")]), { selected: ev, onChange: k => { ev = k; render(); } });
+  chips("tl-heads", ["kv_ctx", "kv_dec", "vfd", "pre_ws", "pre_wrist", "pre_lang", "pre_state", "ctx_ws", "ctx_wrist", "ctx_lang", "ctx_state"].map(h => [h, HEAD[h].name]),
+    { multi: true, selected: heads, swatch: true, onChange: hs => { heads = hs; render(); } });
+  function panel(h) {
+    const W = 420, H = 200, left = 34, right = W - 10, top = 24, bottom = H - 26;
+    const svg = el("svg", { class: "chart", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `${HEAD[h].name} percentile over time` });
+    const x = lin(steps[0], steps[steps.length - 1], left, right), y = lin(0, 100, bottom, top);
+    el("rect", { x: x(onset), y: top, width: x(onset + win) - x(onset), height: bottom - top, fill: "rgba(227,73,72,.08)" }, svg);
+    axes(svg, x, y, { xTicks: [0, 50, 100, 150, 200, 250].filter(t => t <= steps[steps.length - 1]), yTicks: [0, 50, 100], left, right, top, bottom });
+    el("line", { x1: x(onset), x2: x(onset), y1: top, y2: bottom, stroke: "#e34948", "stroke-width": 1.5 }, svg);
+    const tt = el("text", { x: left, y: 13, class: "title" }, svg); tt.textContent = HEAD[h].name;
+    const a = D.e3.events[ev].heads[h];
+    const st = el("text", { x: right, y: 13, "text-anchor": "end" }, svg); st.textContent = `AUROC ${f2(a[0])} · rise ${a[3] >= 0 ? "+" : ""}${a[3].toFixed(0)}`;
+    const tr = D.e3.traces[ev][h];
+    const path = arr => "M" + arr.map((v, i) => v == null ? null : `${x(steps[i])},${y(v)}`).filter(Boolean).join("L");
+    const [em, eq1, eq3] = tr.event, [cm] = tr.clean;
+    const band = em.map((_, i) => i).filter(i => eq1[i] != null);
+    el("path", { d: "M" + band.map(i => `${x(steps[i])},${y(eq3[i])}`).join("L") + "L" + band.slice().reverse().map(i => `${x(steps[i])},${y(eq1[i])}`).join("L") + "Z",
+      fill: HEAD[h].color, "fill-opacity": .14 }, svg);
+    el("path", { d: path(cm), fill: "none", stroke: "#9a9a9a", "stroke-width": 2, "stroke-dasharray": "4 3" }, svg);
+    el("path", { d: path(em), fill: "none", stroke: HEAD[h].color, "stroke-width": 2 }, svg);
+    const cross = el("line", { y1: top, y2: bottom, stroke: "#363636", "stroke-width": 1, opacity: 0 }, svg);
+    const hit = el("rect", { x: left, y: top, width: right - left, height: bottom - top, fill: "transparent" }, svg);
+    hit.addEventListener("pointermove", e => { const r = svg.getBoundingClientRect(), sx = (e.clientX - r.left) / r.width * W;
+      let i = 0, bd = Infinity; steps.forEach((s, k) => { const d = Math.abs(x(s) - sx); if (d < bd) { bd = d; i = k; } });
+      cross.setAttribute("x1", x(steps[i])); cross.setAttribute("x2", x(steps[i])); cross.setAttribute("opacity", .35);
+      showTip(e, `<b>${HEAD[h].name}, step ${steps[i]}</b><div class="row"><span><span class="sw" style="background:${HEAD[h].color}"></span>with event</span><b>${em[i] == null ? "–" : em[i].toFixed(0)}</b></div><div class="row"><span><span class="sw" style="background:#9a9a9a"></span>undisturbed</span><b>${cm[i] == null ? "–" : cm[i].toFixed(0)}</b></div>`); });
+    hit.addEventListener("pointerleave", () => { hideTip(); cross.setAttribute("opacity", 0); });
+    return svg;
+  }
+  function render() {
+    box.innerHTML = ""; heads.forEach(h => box.appendChild(panel(h)));
+    const e = D.e3.events[ev];
+    document.getElementById("tl-success").textContent = `${e.description}: success ${Math.round(100 * e.success[0])} % undisturbed, ${Math.round(100 * e.success[1])} % with the event. Grey dashed: undisturbed run; red line: onset.`;
+  }
+  render();
+}
+
+})();
+</script>
+
+
+  </div>
+</section>
+
+<section class="section" id="results">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3 has-text-centered">Results</h2>
+    <p class="has-text-centered section-lead">Figures and tables of the paper. Questions Q1–Q4 compare the heads with ensemble scores on
+SmolVLA and LIBERO-10; Q5 tests context-specific heads under controlled perturbations (three seeds, all ten tasks).</p>
+    
+
+<div class="figs">
+  <figure><img src="figures/acquisition_curves.png" alt="Figure 2: SAVE learning curves on LIBERO-10: success of the fine-tuned policy as demonstrations are requested, mean and ±1 SD over three independent runs."><figcaption class="caption">Figure 2: SAVE learning curves on LIBERO-10: success of the fine-tuned policy as demonstrations are requested, mean and ±1 SD over three independent runs.</figcaption></figure>
+  <figure><img src="figures/referral_curves.png" alt="Figure 3: Referral to the supervisor at round 10: combined success minus random referral, as a function of the fraction of conditions referred (mean over three seeds)."><figcaption class="caption">Figure 3: Referral to the supervisor at round 10: combined success minus random referral, as a function of the fraction of conditions referred (mean over three seeds).</figcaption></figure>
+  <figure><img src="figures/benchmark_structure.png" alt="Figure 4: (a) Share of the variance of single-execution success between tasks, between conditions of a task and between executions. (b) Within-task failure AUROC at round 10."><figcaption class="caption">Figure 4: (a) Share of the variance of single-execution success between tasks, between conditions of a task and between executions. (b) Within-task failure AUROC at round 10.</figcaption></figure>
+</div>
+
+<h3 class="title is-5 mt-6">Perturbed starting observations</h3>
+<div class="tablewrap"><table class="auroc">
+<thead><tr><th></th><th></th><th colspan="4" class="grp">Raw heads</th><th colspan="4" class="grp">Fused heads</th><th colspan="3" class="grp">Whole-policy</th></tr><tr><th></th><th>Perturbation</th><th class="rot"><span>Workspace</span></th><th class="rot"><span>Wrist</span></th><th class="rot"><span>Instruction</span></th><th class="rot"><span>State</span></th><th class="rot"><span>Workspace</span></th><th class="rot"><span>Wrist</span></th><th class="rot"><span>Instruction</span></th><th class="rot"><span>State</span></th><th class="rot"><span>KV-Ctx</span></th><th class="rot"><span>KV-Dec</span></th><th class="rot"><span>VFD</span></th></tr></thead>
+<tbody>
+<tr class="group"><td colspan="13">Instruction</td></tr>
+<tr><td class="id">S1</td><td>Strongly paraphrased</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#86b6f0">1.00</td><td style="background:#f0efec">0.50</td><td style="background:#ebeded">0.53</td><td style="background:#e7ebee">0.55</td><td style="background:#89b8f0">0.99</td><td style="background:#8cb9f1">0.98</td><td style="background:#88b7f0">0.99</td><td style="background:#86b6f0">1.00</td><td style="background:#91bdf1">0.95</td></tr>
+<tr><td class="id">S2</td><td>All object words replaced by synonyms</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#86b6f0">1.00</td><td style="background:#f0efec">0.50</td><td style="background:#eeeeec">0.51</td><td style="background:#ededed">0.52</td><td style="background:#95bff2">0.94</td><td style="background:#91bdf1">0.95</td><td style="background:#96c0f2">0.93</td><td style="background:#88b7f0">0.99</td><td style="background:#99c1f2">0.92</td></tr>
+<tr><td class="id">S3</td><td>One typo in a non-object word</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#86b6f0">1.00</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#eeeeec">0.51</td><td style="background:#a3c7f3">0.88</td><td style="background:#a9cbf4">0.85</td><td style="background:#a9caf4">0.86</td><td style="background:#8dbaf1">0.97</td><td style="background:#b2d0f5">0.82</td></tr>
+<tr><td class="id">S4</td><td>Object nouns replaced by pronouns</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#86b6f0">1.00</td><td style="background:#f0efec">0.50</td><td style="background:#d9e4f2">0.63</td><td style="background:#d6e3f2">0.65</td><td style="background:#86b6f0">1.00</td><td style="background:#87b6f0">1.00</td><td style="background:#86b6f0">1.00</td><td style="background:#86b6f0">1.00</td><td style="background:#8dbaf1">0.97</td></tr>
+<tr><td class="id">S5</td><td>Translated into German</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#86b6f0">1.00</td><td style="background:#f0efec">0.50</td><td style="background:#c1d9f7">0.76</td><td style="background:#aecdf5">0.84</td><td style="background:#86b6f0">1.00</td><td style="background:#89b8f0">0.99</td><td style="background:#86b6f0">1.00</td><td style="background:#86b6f0">1.00</td><td style="background:#87b7f0">0.99</td></tr>
+<tr class="group"><td colspan="13">Camera images</td></tr>
+<tr><td class="id">S6</td><td>Light at 40 % intensity</td><td style="background:#a8caf4">0.86</td><td style="background:#90bcf1">0.96</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#9cc3f3">0.91</td><td style="background:#90bcf1">0.96</td><td style="background:#dee7f0">0.60</td><td style="background:#d6e3f2">0.64</td><td style="background:#b6d3f6">0.80</td><td style="background:#adcdf4">0.84</td><td style="background:#bdd7f6">0.77</td></tr>
+<tr><td class="id">S7</td><td>Gaussian noise on both images (σ = 0.08)</td><td style="background:#d2e1f3">0.67</td><td style="background:#b1cff5">0.82</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#d0e0f4">0.68</td><td style="background:#afcef5">0.83</td><td style="background:#eeeeed">0.51</td><td style="background:#efeeec">0.51</td><td style="background:#e2e9ef">0.58</td><td style="background:#e0e8f0">0.59</td><td style="background:#e0e8f0">0.59</td></tr>
+<tr><td class="id">S8</td><td>Workspace camera moved by 4 cm and 6°</td><td style="background:#9cc3f2">0.91</td><td style="background:#f0edea">0.49</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#91bdf1">0.95</td><td style="background:#e9ecee">0.54</td><td style="background:#d2e1f3">0.67</td><td style="background:#ccdef5">0.70</td><td style="background:#aecdf5">0.84</td><td style="background:#a0c5f3">0.89</td><td style="background:#b9d4f6">0.79</td></tr>
+<tr><td class="id">S9</td><td>Target 75 % occluded in the workspace image</td><td style="background:#cedff4">0.69</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#cbdef5">0.71</td><td style="background:#eeeeed">0.51</td><td style="background:#e0e8f0">0.59</td><td style="background:#e6ebee">0.55</td><td style="background:#cedff4">0.69</td><td style="background:#cedff4">0.69</td><td style="background:#dee6f0">0.60</td></tr>
+<tr><td class="id">S10</td><td>Table texture replaced</td><td style="background:#c7dcf6">0.73</td><td style="background:#a1c6f3">0.89</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#c3daf7">0.75</td><td style="background:#a2c6f3">0.89</td><td style="background:#dee7f0">0.60</td><td style="background:#d9e4f2">0.63</td><td style="background:#c7dcf6">0.73</td><td style="background:#c1d9f7">0.76</td><td style="background:#c7dcf6">0.73</td></tr>
+<tr><td class="id">S11</td><td>Wrist image blacked out</td><td style="background:#f0efec">0.50</td><td style="background:#86b6f0">1.00</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#d3e1f3">0.66</td><td style="background:#86b6f0">1.00</td><td style="background:#96bff2">0.94</td><td style="background:#8bb9f1">0.98</td><td style="background:#86b6f0">1.00</td><td style="background:#86b6f0">1.00</td><td style="background:#86b6f0">1.00</td></tr>
+<tr class="group"><td colspan="13">Scene</td></tr>
+<tr><td class="id">S12</td><td>Target displaced by 10 cm</td><td style="background:#d1e0f4">0.67</td><td style="background:#99c1f2">0.92</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#cddef5">0.70</td><td style="background:#9ac2f2">0.92</td><td style="background:#d4e2f3">0.66</td><td style="background:#d1e1f4">0.67</td><td style="background:#c0d9f7">0.76</td><td style="background:#b1cff5">0.82</td><td style="background:#cddff4">0.69</td></tr>
+<tr><td class="id">S13</td><td>Another object moved next to the target</td><td style="background:#c4dbf7">0.74</td><td style="background:#98c0f2">0.93</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#c7dcf6">0.73</td><td style="background:#9dc3f3">0.91</td><td style="background:#d9e4f2">0.63</td><td style="background:#dae5f1">0.62</td><td style="background:#c4daf7">0.75</td><td style="background:#b6d2f6">0.80</td><td style="background:#d6e3f2">0.65</td></tr>
+<tr><td class="id">S14</td><td>Target rotated by 90°</td><td style="background:#e1e8f0">0.59</td><td style="background:#caddf5">0.71</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#dde6f1">0.60</td><td style="background:#cddff5">0.70</td><td style="background:#e1e8f0">0.58</td><td style="background:#e5eaef">0.56</td><td style="background:#d9e4f2">0.63</td><td style="background:#d2e1f3">0.66</td><td style="background:#e0e8f0">0.59</td></tr>
+<tr class="group"><td colspan="13">Robot</td></tr>
+<tr><td class="id">S15</td><td>Arm joints offset by 0.1 rad</td><td style="background:#b9d4f6">0.79</td><td style="background:#8ab8f0">0.99</td><td style="background:#f0efec">0.50</td><td style="background:#86b6f0">1.00</td><td style="background:#afcef5">0.83</td><td style="background:#8cb9f1">0.98</td><td style="background:#cfe0f4">0.68</td><td style="background:#96bff2">0.94</td><td style="background:#a5c8f4">0.87</td><td style="background:#8cbaf1">0.97</td><td style="background:#96bff2">0.94</td></tr>
+<tr><td class="id">S16</td><td>Reported end-effector position offset by 3 cm</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#86b6f0">1.00</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#cddff5">0.69</td><td style="background:#f0efec">0.50</td><td style="background:#dae5f1">0.62</td><td style="background:#dae5f1">0.62</td></tr>
+<tr class="group"><td colspan="13">Instruction and scene</td></tr>
+<tr><td class="id">S17</td><td>Other task's instruction, its objects absent from the scene</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#f0efec">0.50</td><td style="background:#eaecee">0.54</td><td style="background:#e6eaef">0.56</td><td style="background:#b4d1f5">0.81</td><td style="background:#89b8f0">0.99</td><td style="background:#96bff2">0.93</td><td style="background:#86b6f0">1.00</td><td style="background:#8dbaf1">0.97</td></tr>
+<tr class="mean"><td></td><td>Mean over perturbations</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td style="background:#b3d1f5">0.81</td><td style="background:#a8caf4">0.86</td><td style="background:#b7d3f6">0.80</td></tr>
+</tbody>
+<caption class="caption" style="caption-side: bottom; padding-top: 8px">Table 4: AUROC of perturbed against clean starting observations within a task, mean over three seeds; 25 initial states per task (VFD on 10). Chance level is 0.5.</caption>
+</table></div>
+
+<h3 class="title is-5 mt-6">Perturbations during execution</h3>
+<div class="tablewrap"><table class="auroc">
+<thead><tr><th></th><th></th><th colspan="4" class="grp">Raw heads</th><th colspan="4" class="grp">Fused heads</th><th colspan="3" class="grp">Whole-policy</th></tr><tr><th></th><th>Perturbation</th><th class="rot"><span>Workspace</span></th><th class="rot"><span>Wrist</span></th><th class="rot"><span>Instruction</span></th><th class="rot"><span>State</span></th><th class="rot"><span>Workspace</span></th><th class="rot"><span>Wrist</span></th><th class="rot"><span>Instruction</span></th><th class="rot"><span>State</span></th><th class="rot"><span>KV-Ctx</span></th><th class="rot"><span>KV-Dec</span></th><th class="rot"><span>VFD</span></th></tr></thead>
+<tbody>
+<tr class="group"><td colspan="13">Instruction</td></tr>
+<tr><td class="id">E1</td><td>Strongly paraphrased</td><td style="background:#eceded">0.52</td><td style="background:#e6eaef">0.56</td><td style="background:#86b6f0">1.00</td><td style="background:#e5eaef">0.56</td><td style="background:#e8ebee">0.54</td><td style="background:#eceded">0.52</td><td style="background:#8ab8f0">0.98</td><td style="background:#c0d8f7">0.76</td><td style="background:#8dbaf1">0.97</td><td style="background:#93bef2">0.95</td><td style="background:#a0c5f3">0.90</td></tr>
+<tr><td class="id">E2</td><td>Switched to another task's instruction</td><td style="background:#dfe7f0">0.59</td><td style="background:#d9e4f2">0.63</td><td style="background:#f0efec">0.50</td><td style="background:#cfe0f4">0.68</td><td style="background:#dde6f1">0.61</td><td style="background:#dde6f1">0.60</td><td style="background:#b9d4f6">0.79</td><td style="background:#bed7f6">0.77</td><td style="background:#a3c7f3">0.88</td><td style="background:#96bff2">0.93</td><td style="background:#9bc2f2">0.92</td></tr>
+<tr><td class="id">E3</td><td>Negated (“do not …”)</td><td style="background:#f0ece8">0.48</td><td style="background:#f0ece8">0.48</td><td style="background:#86b6f0">1.00</td><td style="background:#f0edea">0.49</td><td style="background:#f1e9e4">0.46</td><td style="background:#f1e8e4">0.46</td><td style="background:#9ec4f3">0.90</td><td style="background:#e0e7f0">0.59</td><td style="background:#b0cff5">0.83</td><td style="background:#bcd6f6">0.78</td><td style="background:#d9e4f2">0.63</td></tr>
+<tr class="group"><td colspan="13">Camera images</td></tr>
+<tr><td class="id">E4</td><td>Light at 40 % intensity</td><td style="background:#b7d3f6">0.80</td><td style="background:#bed7f6">0.77</td><td style="background:#f0efec">0.50</td><td style="background:#f1e9e4">0.46</td><td style="background:#aaccf4">0.85</td><td style="background:#bcd6f6">0.78</td><td style="background:#e2e8ef">0.58</td><td style="background:#eeeeec">0.51</td><td style="background:#c3daf7">0.75</td><td style="background:#c8dcf6">0.72</td><td style="background:#d8e4f2">0.64</td></tr>
+<tr><td class="id">E5</td><td>Workspace camera bumped by 2 cm and 3°</td><td style="background:#d3e2f3">0.66</td><td style="background:#f1e9e4">0.46</td><td style="background:#f0efec">0.50</td><td style="background:#f1e7e2">0.44</td><td style="background:#c6dbf6">0.74</td><td style="background:#f1e7e2">0.45</td><td style="background:#eceded">0.52</td><td style="background:#f1eae6">0.47</td><td style="background:#e8ebee">0.55</td><td style="background:#e8ebee">0.54</td><td style="background:#e2e8ef">0.58</td></tr>
+<tr><td class="id">E6</td><td>Target 75 % occluded for 60 steps</td><td style="background:#d3e1f3">0.66</td><td style="background:#f0ede9">0.49</td><td style="background:#f0efec">0.50</td><td style="background:#f1eae6">0.47</td><td style="background:#c6dbf6">0.74</td><td style="background:#f1e9e5">0.46</td><td style="background:#d9e4f2">0.63</td><td style="background:#efefec">0.50</td><td style="background:#cfe0f4">0.68</td><td style="background:#d6e3f2">0.64</td><td style="background:#dce6f1">0.61</td></tr>
+<tr><td class="id">E7</td><td>Wrist image frozen for 60 steps</td><td style="background:#e8ebee">0.55</td><td style="background:#f0ece8">0.48</td><td style="background:#f0efec">0.50</td><td style="background:#e7ebee">0.55</td><td style="background:#e4e9ef">0.57</td><td style="background:#f1e9e4">0.46</td><td style="background:#e2e8ef">0.58</td><td style="background:#e2e8ef">0.58</td><td style="background:#d5e2f3">0.65</td><td style="background:#d1e1f4">0.67</td><td style="background:#cbdef5">0.70</td></tr>
+<tr><td class="id">E8</td><td>Heavy noise on both images (σ = 0.35)</td><td style="background:#86b6f0">1.00</td><td style="background:#86b6f0">1.00</td><td style="background:#f0efec">0.50</td><td style="background:#dee6f1">0.60</td><td style="background:#86b6f0">1.00</td><td style="background:#86b6f0">1.00</td><td style="background:#a4c8f3">0.88</td><td style="background:#dae5f1">0.62</td><td style="background:#86b6f0">1.00</td><td style="background:#87b7f0">0.99</td><td style="background:#8ab8f0">0.98</td></tr>
+<tr class="group"><td colspan="13">Scene</td></tr>
+<tr><td class="id">E9</td><td>Target displaced by 6 cm</td><td style="background:#dee6f0">0.60</td><td style="background:#b9d4f6">0.79</td><td style="background:#f0efec">0.50</td><td style="background:#dfe7f0">0.59</td><td style="background:#d4e2f3">0.65</td><td style="background:#bdd7f6">0.77</td><td style="background:#c7dcf6">0.73</td><td style="background:#d9e4f2">0.63</td><td style="background:#bcd6f6">0.78</td><td style="background:#bbd5f6">0.78</td><td style="background:#b6d2f6">0.80</td></tr>
+<tr><td class="id">E10</td><td>Another object moved next to the target</td><td style="background:#d5e3f3">0.65</td><td style="background:#c5dbf6">0.74</td><td style="background:#f0efec">0.50</td><td style="background:#eeeeec">0.51</td><td style="background:#caddf5">0.71</td><td style="background:#c3daf7">0.75</td><td style="background:#d8e4f2">0.63</td><td style="background:#e3e9ef">0.57</td><td style="background:#c2daf7">0.75</td><td style="background:#cddff5">0.70</td><td style="background:#d0e0f4">0.68</td></tr>
+<tr><td class="id">E11</td><td>Target removed</td><td style="background:#c8dcf6">0.72</td><td style="background:#c7dcf6">0.73</td><td style="background:#f0efec">0.50</td><td style="background:#e6eaee">0.56</td><td style="background:#bad5f6">0.79</td><td style="background:#cedff4">0.69</td><td style="background:#b5d2f5">0.81</td><td style="background:#cedff4">0.69</td><td style="background:#a3c7f3">0.88</td><td style="background:#a0c5f3">0.89</td><td style="background:#9fc5f3">0.90</td></tr>
+<tr class="group"><td colspan="13">Robot</td></tr>
+<tr><td class="id">E12</td><td>Arm pushed (joints offset by 0.1 rad)</td><td style="background:#bed7f6">0.77</td><td style="background:#b2d0f5">0.82</td><td style="background:#f0efec">0.50</td><td style="background:#b2d0f5">0.82</td><td style="background:#bcd6f6">0.78</td><td style="background:#b4d1f5">0.81</td><td style="background:#b3d0f5">0.82</td><td style="background:#d1e0f4">0.67</td><td style="background:#a4c8f3">0.88</td><td style="background:#a5c8f4">0.87</td><td style="background:#abccf4">0.85</td></tr>
+<tr class="mean"><td></td><td>Mean over perturbations</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td style="background:#b7d3f6">0.80</td><td style="background:#b9d4f6">0.79</td><td style="background:#bfd8f7">0.76</td></tr>
+</tbody>
+<caption class="caption" style="caption-side: bottom; padding-top: 8px">Table 5: AUROC of the 50 steps after a perturbation against the same steps of an unperturbed run with the same initial state and seed; two initial states per task, mean over three seeds. Chance level is 0.5.</caption>
+</table></div>
+
+<h3 class="title is-5 mt-6">Referral under controlled within-task variation</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Score</th><th>Within-task nAUC</th><th>Global nAUC</th><th>Automated</th><th>Failure AUROC</th></tr></thead>
+<tbody>
+<tr><td>KV-Ctx</td><td>0.40 ± 0.05</td><td>0.35 ± 0.02</td><td>0.65 ± 0.22</td><td>0.76 ± 0.03</td></tr>
+<tr><td>KV-Dec</td><td>0.46 ± 0.03</td><td>0.41 ± 0.02</td><td>0.76 ± 0.13</td><td>0.79 ± 0.01</td></tr>
+<tr><td>VFD (two policies)</td><td>0.40 ± 0.03</td><td>0.39 ± 0.03</td><td>0.73 ± 0.14</td><td>0.75 ± 0.00</td></tr>
+<tr><td>Cross-replicate reference</td><td>0.21 ± 0.03</td><td>0.21 ± 0.03</td><td>0.53 ± 0.25</td><td>0.62 ± 0.01</td></tr>
+</tbody>
+<caption class="caption" style="caption-side: bottom; padding-top: 8px">Table 6: Within-task referral under perturbations to a supervisor trained with them (mean ± SD over three seeds). Chance level is 0 for nAUC and 0.5 for AUROC. KV-Dec minus VFD on the same conditions: within-task nAUC +0.06 [0.03, 0.10], failure AUROC +0.03 [0.02, 0.05] (95 % intervals).</caption>
+</table></div>
+
+<div class="figs one">
+  <figure><img src="figures/context_success.png" alt="Figure 5"><figcaption class="caption">Figure 5: Task success under perturbations. (a) Detection of perturbed starting observations (KV-Dec) against the loss of success they cause. (b) Success of the supervisor minus that of the policy, per perturbation of the referral experiment.</figcaption></figure>
+</div>
+<!-- END:RESULTS -->
+
+
+  </div>
+</section>
+
+<section class="section" id="BibTeX">
+  <div class="container is-max-desktop content">
+    <h2 class="title">BibTeX</h2>
+    <pre><code>@misc{keller2026posthoc,
+  title  = {Post-hoc Epistemic Uncertainty for Vision--Language--Action Policies},
+  author = {Keller, Johannes and Blo{\ss}e, Albrecht M. and Lindenmeyer, Adrian and
+            Neumuth, Thomas and Schneider, Daniel},
+  year   = {2026}
+}</code></pre>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <div class="columns is-centered">
+      <div class="column is-8">
+        <div class="content">
+          <p>
+            This website is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative
+            Commons Attribution-ShareAlike 4.0 International License</a>.
+          </p>
+          <p>
+            Website template borrowed from <a href="https://nerfies.github.io">Nerfies</a>
+            (<a href="https://github.com/nerfies/nerfies.github.io">source code</a>), by Keunhong Park et al.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</footer>
+<script>
+// Play the gallery videos only while they are on screen.
+const motionOk = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const watcher = new IntersectionObserver(entries => entries.forEach(e => {
+  const v = e.target;
+  if (e.isIntersecting && motionOk) { v.preload = 'auto'; v.play().catch(() => {}); } else { v.pause(); }
+}), { threshold: 0.35 });
+document.querySelectorAll('video[data-autoplay]').forEach(v => watcher.observe(v));
+</script>
+</body>
+</html>
